@@ -1,113 +1,221 @@
-import Image from 'next/image'
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toBase64 } from "@/lib/file";
+import type { DetectTextResponse } from "aws-sdk/clients/rekognition";
+import axios from "axios";
+import Jimp from "jimp/es";
+import { Loader2 } from "lucide-react";
+import { nanoid } from "nanoid";
+import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function Home() {
+  const [image, setImage] = useState<string>();
+  const [maskImage, setMaskImage] = useState<string>();
+  const [detection, setDetection] = useState<DetectTextResponse>();
+  const [loading, setLoading] = useState<boolean>(false);
+  const [resultImage, setResultImage] = useState<string>();
+  const searchParams = useSearchParams();
+  const id = searchParams.get("id");
+  const [excludeMask, setExcludeMask] = useState<number[]>([]);
+  const router = useRouter();
+  const uploadImage = async (
+    id: string,
+    image: string,
+    prefix: "image" | "mask",
+  ) => {
+    await axios.post<{
+      imgUrl: string;
+    }>("/api/image", {
+      fileName: id,
+      image: image,
+      prefix,
+    });
+    router.push(`?id=${id}`);
+  };
+
+  const removeWatermark = async () => {
+    if (!id || !maskImage) return;
+    setLoading(true);
+    await uploadImage(id, maskImage, "mask");
+    const { data } = await axios.get<string>(`/api/inpaint?filename=${id}`);
+    setResultImage(data);
+    setLoading(false);
+  };
+
+  const clearMetadatas = () => {
+    setImage(undefined);
+    setMaskImage(undefined);
+    setResultImage(undefined);
+    setDetection(undefined);
+    setExcludeMask([]);
+  };
+
+  useEffect(() => {
+    if (!id) return;
+    setImage(
+      `https://watermark-remover.s3.ap-southeast-1.amazonaws.com/image/${id}`,
+    );
+    (async () => {
+      const res = await axios.get<DetectTextResponse>(
+        `/api/text-detection?filename=${id}`,
+      );
+      setDetection(res.data);
+    })();
+  }, [id]);
+
+  useEffect(() => {
+    if (!detection) return;
+    const getMaskImage = async () => {
+      const mask = new Jimp(512, 512, 0xffffffff);
+      detection.TextDetections?.filter(
+        (td) => !excludeMask.includes(td.Id ?? -1),
+      ).forEach((textDetection) => {
+        const x = Math.round(
+          (textDetection.Geometry?.BoundingBox?.Left ?? 0) * 512,
+        );
+        const y = Math.round(
+          (textDetection.Geometry?.BoundingBox?.Top ?? 0) * 512,
+        );
+        const width = Math.round(
+          (textDetection.Geometry?.BoundingBox?.Width ?? 0) * 512,
+        );
+        const height = Math.round(
+          (textDetection.Geometry?.BoundingBox?.Height ?? 0) * 512,
+        );
+        mask.scan(x, y, width, height, function (x, y, idx) {
+          this.bitmap.data[idx + 0] = 0;
+          this.bitmap.data[idx + 1] = 0;
+          this.bitmap.data[idx + 2] = 0;
+          this.bitmap.data[idx + 3] = 255;
+        });
+      });
+      const maskBase64 = await mask.getBase64Async(Jimp.MIME_PNG);
+      setMaskImage(maskBase64);
+    };
+    getMaskImage();
+  }, [detection, id, excludeMask]);
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+    <main className="space-y-6 p-4">
+      <div className="flex gap-2">
+        <Input
+          type="file"
+          accept="image/*"
+          onChange={async (e) => {
+            if (e.target.files === null) return;
+            if (e.target.files.length === 0) return;
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
+            clearMetadatas();
+
+            const file = e.target.files[0];
+            const data = await toBase64(file);
+            const image = await Jimp.read(data);
+            const width = image.getWidth();
+            const height = image.getHeight();
+            const newid = nanoid();
+            if (width !== 512 || height !== 512) {
+              alert("Please upload 512x512 image");
+              return;
+            }
+            await uploadImage(newid, data, "image");
+          }}
         />
+        <Button
+          onClick={removeWatermark}
+          disabled={!detection}
+          className="w-40"
+        >
+          {loading ? <Loader2 className="animate-spin" /> : "Remove Watermark"}
+        </Button>
       </div>
+      <div className="flex justify-center gap-10">
+        {image && (
+          <div className="space-y-2 border border-border p-4">
+            <h2 className="text-center text-lg">Original Image</h2>
+            <div className="relative h-max w-max">
+              <Image
+                className="relative z-0 drop-shadow-md"
+                alt="unmasked-image"
+                src={image}
+                width={512}
+                height={512}
+              />
 
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
+              {detection?.TextDetections?.map((textDetection) => (
+                <div
+                  key={textDetection.Id}
+                  onClick={() => {
+                    if (excludeMask.includes(textDetection.Id ?? -1)) {
+                      setExcludeMask((prev) =>
+                        prev.filter((id) => id !== textDetection.Id),
+                      );
+                    } else {
+                      setExcludeMask((prev) => [
+                        ...prev,
+                        textDetection.Id ?? -1,
+                      ]);
+                    }
+                  }}
+                  style={{
+                    position: "absolute",
+                    width: Math.round(
+                      (textDetection.Geometry?.BoundingBox?.Width ?? 0) * 512,
+                    ),
+                    height: Math.round(
+                      (textDetection.Geometry?.BoundingBox?.Height ?? 0) * 512,
+                    ),
+                    top: Math.round(
+                      (textDetection.Geometry?.BoundingBox?.Top ?? 0) * 512,
+                    ),
+                    left: Math.round(
+                      (textDetection.Geometry?.BoundingBox?.Left ?? 0) * 512,
+                    ),
+                    zIndex: 10,
+                    backgroundColor: excludeMask.includes(
+                      textDetection.Id ?? -1,
+                    )
+                      ? "transparent"
+                      : "red",
+                    border: "4px solid red",
+                    opacity: 0.2,
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        {maskImage && (
+          <div className="space-y-2 border border-border p-4">
+            <h2 className="text-center text-lg">Mask Image</h2>
+            <Image
+              alt="mask-image"
+              src={maskImage}
+              width={512}
+              height={512}
+              className="drop-shadow-md"
+            />
+          </div>
+        )}
       </div>
+      {resultImage && (
+        <div className="flex justify-center">
+          <div className="w-max space-y-2 border border-border p-4">
+            <h2 className="text-center text-lg">Result Image</h2>
+            <Image
+              alt="mask-image"
+              src={resultImage}
+              width={512}
+              height={512}
+              className="drop-shadow-md"
+            />
+          </div>
+        </div>
+      )}
     </main>
-  )
+  );
 }
